@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Gesture AI + Fluid + AR Project</title>
+
+<style>
+html,body{
+  margin:0;
+  padding:0;
+  overflow:hidden;
+  background:black;
+}
+
+video{
+  position:fixed;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+canvas{
+  position:fixed;
+  pointer-events:none;
+}
+</style>
+</head>
+
+<body>
+
+<video id="video" autoplay muted></video>
+<canvas id="canvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+/* =====================
+   TEMEL AYARLAR
+===================== */
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+canvas.width = innerWidth;
+canvas.height = innerHeight;
+
+/* =====================
+   PARTİKÜLLER (DUMAN)
+===================== */
+let particles = [];
+for(let i=0;i<600;i++){
+  particles.push({
+    x:Math.random()*canvas.width,
+    y:Math.random()*canvas.height,
+    vx:0, vy:0
+  });
+}
+
+/* =====================
+   MEDIA PIPE
+===================== */
+const hands = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+
+hands.setOptions({
+  maxNumHands:2,
+  minDetectionConfidence:0.7,
+  minTrackingConfidence:0.7
+});
+
+/* =====================
+   YARDIMCI FONKSİYONLAR
+===================== */
+
+// Duman / sıvı hissi
+function fluid(p,hx,hy){
+  let dx = p.x - hx;
+  let dy = p.y - hy;
+  let d = Math.sqrt(dx*dx+dy*dy);
+
+  if(d < 200){
+    let f = (200-d)*0.0004;
+    p.vx += dx*f;
+    p.vy += dy*f;
+  }
+
+  p.vx *= 0.97;
+  p.vy *= 0.97;
+}
+
+// AR halo
+function drawAR(x,y){
+  let g = ctx.createRadialGradient(x,y,10,x,y,100);
+  g.addColorStop(0,"rgba(0,255,255,0.8)");
+  g.addColorStop(1,"rgba(0,255,255,0)");
+
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x,y,100,0,Math.PI*2);
+  ctx.fill();
+}
+
+// Yumruk kontrol
+function isFist(lm){
+  return lm[8].y>lm[6].y &&
+         lm[12].y>lm[10].y &&
+         lm[16].y>lm[14].y &&
+         lm[20].y>lm[18].y;
+}
+
+// Basit AI karar
+function aiState(lm){
+  let spread = Math.abs(lm[8].x - lm[20].x);
+  if(spread > 0.35) return "AGGRESSIVE";
+  if(spread > 0.15) return "CALM";
+  return "IDLE";
+}
+
+/* =====================
+   ANA ÇALIŞMA
+===================== */
+let mode = 0;
+
+hands.onResults(res=>{
+  ctx.fillStyle="rgba(0,0,0,0.15)";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  if(!res.multiHandLandmarks) return;
+
+  // İki el = mod değiştir
+  if(res.multiHandLandmarks.length === 2){
+    mode = 1;
+  } else {
+    mode = 0;
+  }
+
+  const lm = res.multiHandLandmarks[0];
+  const ix = lm[8].x * canvas.width;
+  const iy = lm[8].y * canvas.height;
+
+  // Yumruk = reset
+  if(isFist(lm)){
+    particles.forEach(p=>{
+      p.x=Math.random()*canvas.width;
+      p.y=Math.random()*canvas.height;
+      p.vx=p.vy=0;
+    });
+  }
+
+  // AI durumu
+  const state = aiState(lm);
+
+  // AR efekt
+  drawAR(ix,iy);
+
+  // Partiküller
+  particles.forEach(p=>{
+    fluid(p,ix,iy);
+
+    if(state==="AGGRESSIVE"){
+      p.vx*=1.2; p.vy*=1.2;
+    }
+
+    p.x+=p.vx;
+    p.y+=p.vy;
+
+    ctx.fillStyle =
+      state==="AGGRESSIVE" ? "red" :
+      state==="CALM" ? "cyan" : "white";
+
+    ctx.fillRect(p.x,p.y,3,3);
+  });
+});
+
+/* =====================
+   KAMERA
+===================== */
+const camera = new Camera(video,{
+  onFrame: async()=>{
+    await hands.send({image:video});
+  },
+  width:640,
+  height:480
+});
+camera.start();
+</script>
+
+</body>
+</html>
